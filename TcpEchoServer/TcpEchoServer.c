@@ -62,8 +62,8 @@ int main(void) {
         printf("Client connected\n");
 
         char buf[1024];
-        int recvedSize = recv(client_sock, buf, (int)sizeof(buf), 0);
-        while (0 < recvedSize) {
+        const int recvedSize = recv(client_sock, buf, (int)sizeof(buf), 0);
+        if (0 < recvedSize) {
             int sentTotalSize = 0;
             while (sentTotalSize < recvedSize) {
                 int sentSize = send(client_sock, buf + sentTotalSize, recvedSize - sentTotalSize, 0);
@@ -74,8 +74,7 @@ int main(void) {
                 sentTotalSize += sentSize;
             }
         }
-
-        if (recvedSize == 0) {
+        else if (recvedSize == 0) {
             printf("Client disconnected\n");
         }
         else if (recvedSize == SOCKET_ERROR) {
