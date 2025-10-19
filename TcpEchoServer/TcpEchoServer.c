@@ -26,6 +26,49 @@ static int sendData(SOCKET client_sock, int sentCount)
     return 0;
 }
 
+static int handle_client(SOCKET client_sock)
+{
+    int ret = 1;
+    char buf[256];
+    int sentCount = 0;
+
+    while (1) {
+        // ブロッキングで要求を待つ（クライアントが送るまでここで待機）
+        int recvlen = recv(client_sock, buf, sizeof(buf) - 1, 0);
+        if (recvlen == 0) {
+            // クライアントが接続を閉じた
+            printf("Client closed connection\n");
+            break;
+        }
+        if (recvlen == SOCKET_ERROR) {
+            fprintf(stderr, "recv failed: %d\n", WSAGetLastError());
+            break;
+        }
+
+        buf[recvlen] = '\0';
+        if (strncmp(buf, "GET", 3) == 0) {
+            ++sentCount;
+            if (sendData(client_sock, sentCount) != 0) {
+                fprintf(stderr, "sendData failed\n");
+                break;
+            }
+        }
+        else if (strncmp(buf, "QUIT", 4) == 0) {
+            // クライアントが終了を要求したら切断
+            ret = 0;
+            break;
+        }
+        else {
+            // 不明な要求は無視またはエラーメッセージを返す
+            const char* resp = "ERR\n";
+            send(client_sock, resp, (int)strlen(resp), 0);
+        }
+    }
+
+    closesocket(client_sock);
+    return ret;
+}
+
 int main(void) {
     WSADATA wsa;
     SOCKET listen_sock = INVALID_SOCKET;
@@ -73,7 +116,6 @@ int main(void) {
 
     printf("Tcp server listening on 127.0.0.1:4000\n");
 
-    int sentCount = 0;
     while (1) {
         client_sock = accept(listen_sock, NULL, NULL);
         if (client_sock == INVALID_SOCKET) {
@@ -83,12 +125,7 @@ int main(void) {
 
         printf("Client connected\n");
 
-        while (1) {
-            ++sentCount;
-            if (sendData(client_sock, sentCount) != 0) break;
-        }
-
-        closesocket(client_sock);
+        handle_client(client_sock);
     }
 
     closesocket(listen_sock);

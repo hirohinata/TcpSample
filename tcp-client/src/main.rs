@@ -4,12 +4,12 @@ use axum::{
     routing::get,
     Router,
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpStream, TcpListener},
     sync::watch,
-    time::sleep,
+    time::{sleep, timeout, Duration, Interval, interval},
 };
 
 #[derive(Debug, Clone)]
@@ -129,25 +129,54 @@ async fn tcp_worker_loop(addr: String, tx: watch::Sender<SharedData>) {
 }
 
 async fn handle_tcp_stream(mut stream: TcpStream, tx: &watch::Sender<SharedData>) -> tokio::io::Result<()> {
-    let (r, _w) = stream.split();
+    // split して書き込み側を使う
+    let (r, mut w) = stream.split();
     let mut reader = BufReader::new(r);
     let mut line = String::new();
 
+    // 20ms 周期
+    let mut ticker: Interval = interval(Duration::from_millis(20));
+
     loop {
-        line.clear();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            println!("Remote closed connection");
-            return Ok(());
+        // 次の tick を待つ（周期制御）
+        ticker.tick().await;
+
+        // 要求を送る
+        if let Err(e) = w.write_all(b"GET\n").await {
+            eprintln!("write failed: {}", e);
+            return Err(e);
+        }
+        // 送信が TCP の内部バッファに入っただけでも先に進める -- flush を入れたければ追加
+        if let Err(e) = w.flush().await {
+            eprintln!("flush failed: {}", e);
+            return Err(e);
         }
 
-        let payload = line.trim_end().to_string();
-
-        let new = SharedData {
-            latest: payload.clone(),
-        };
-        if tx.send(new).is_err() {
-            eprintln!("No receivers left for watch channel");
+        // 読み取りはタイムアウト付きで行う（ここでは 50ms を上限にする例）
+        line.clear();
+        match timeout(Duration::from_millis(50), reader.read_line(&mut line)).await {
+            Ok(Ok(n)) => {
+                if n == 0 {
+                    println!("Remote closed connection");
+                    return Ok(());
+                }
+                let payload = line.trim_end().to_string();
+                let new = SharedData {
+                    latest: payload,
+                };
+                if tx.send(new).is_err() {
+                    eprintln!("No receivers left for watch channel");
+                }
+            }
+            Ok(Err(e)) => {
+                // read error
+                eprintln!("read_line error: {}", e);
+                return Err(e);
+            }
+            Err(_) => {
+                // timeout: 応答が来なかった -> 次の周期へ（何もしない）
+                continue;
+            }
         }
     }
 }
