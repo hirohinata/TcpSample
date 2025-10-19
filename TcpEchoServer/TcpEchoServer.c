@@ -5,6 +5,27 @@
 
 #pragma comment(lib, "Ws2_32.lib")
 
+static int sendData(SOCKET client_sock, int sentCount)
+{
+    char buf[1024];
+    int dataSize = sprintf_s(buf, sizeof(buf), "Data Count: %d\n", sentCount);
+    int sentTotalSize = 0;
+
+    while (sentTotalSize < dataSize) {
+        int sentSize = send(client_sock, buf + sentTotalSize, dataSize - sentTotalSize, 0);
+        if (sentSize == SOCKET_ERROR) {
+            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+            return 1;
+        }
+        else if (sentSize == 0) {
+            printf("Client disconnected\n");
+        }
+        sentTotalSize += sentSize;
+    }
+
+    return 0;
+}
+
 int main(void) {
     WSADATA wsa;
     SOCKET listen_sock = INVALID_SOCKET;
@@ -50,8 +71,9 @@ int main(void) {
         return 1;
     }
 
-    printf("Echo server listening on 127.0.0.1:4000\n");
+    printf("Tcp server listening on 127.0.0.1:4000\n");
 
+    int sentCount = 0;
     while (1) {
         client_sock = accept(listen_sock, NULL, NULL);
         if (client_sock == INVALID_SOCKET) {
@@ -61,24 +83,9 @@ int main(void) {
 
         printf("Client connected\n");
 
-        char buf[1024];
-        const int recvedSize = recv(client_sock, buf, (int)sizeof(buf), 0);
-        if (0 < recvedSize) {
-            int sentTotalSize = 0;
-            while (sentTotalSize < recvedSize) {
-                int sentSize = send(client_sock, buf + sentTotalSize, recvedSize - sentTotalSize, 0);
-                if (sentSize == SOCKET_ERROR) {
-                    fprintf(stderr, "send failed: %d\n", WSAGetLastError());
-                    break;
-                }
-                sentTotalSize += sentSize;
-            }
-        }
-        else if (recvedSize == 0) {
-            printf("Client disconnected\n");
-        }
-        else if (recvedSize == SOCKET_ERROR) {
-            fprintf(stderr, "recv failed: %d\n", WSAGetLastError());
+        while (1) {
+            ++sentCount;
+            if (sendData(client_sock, sentCount) != 0) break;
         }
 
         closesocket(client_sock);
